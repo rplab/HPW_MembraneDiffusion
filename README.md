@@ -7,5 +7,3 @@ The function HPW_drag.m calculates the translational and rotational drag and dif
 HPW_fit.m calculates the best-fit membrane viscosity and inclusion radius, given (measured) rotational and translational diffusion coefficients.
 
 See https://eighteenthelephant.wordpress.com/2018/09/04/membrane-diffusion-software/ for discussion. 
-
-(test)
