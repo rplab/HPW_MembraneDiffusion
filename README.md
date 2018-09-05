@@ -8,7 +8,4 @@ HPW_fit.m calculates the best-fit membrane viscosity and inclusion radius, given
 
 See https://eighteenthelephant.wordpress.com/2018/09/04/membrane-diffusion-software/ for discussion. 
 
-<<<<<<< HEAD
-[testing...]
-=======
->>>>>>> 104dc96880804d648cb56066d6c4ae497ec9a2f4
+(test)
