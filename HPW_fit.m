@@ -16,7 +16,7 @@
 %
 % Inputs:
 %    Dr = rotational diffusion coefficient (rad^2/s)
-%    Dr = translational diffusion coefficient (m^2/s)
+%    Dt = translational diffusion coefficient (m^2/s)
 %    eta_w = external (water) viscosity, default 8.9e-4 Pa.s
 %    T = temperature (K), default 295;
 %    nTerms =  number of terms to calculate in "infinite" series; default 30
