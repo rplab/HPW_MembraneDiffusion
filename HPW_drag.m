@@ -22,10 +22,10 @@
 %    a   = inclusion radius (m)
 %    eta_w = external (water) viscosity, default 8.9e-4 Pa.s
 %    T = temperature (K), default 295;
-%    nTerms =  number of terms to calculate in "infinite" series; default 30
-%    num_lterms = number of "l" terms to calculate in ; default 20
-%    num_mterms = number of "l" terms to calculate in ; default 15;
-%    plotopt = true to plot tm, Tm, rm terms (default false)
+%    nTerms =  number of terms to calculate in "infinite" series; default 36
+%    num_lterms = number of "l" terms to calculate in ; default 36
+%    num_mterms = number of "m" terms to calculate in ; default 36;
+%    plotopt = true to plot various things including tm, Tm, rm terms (default false)
 %
 % Outputs:
 %    D_T = Translational diffusion coefficient (m^2/s)
@@ -50,7 +50,7 @@
 %%
 % Raghuveer Parthasarathy
 % August 28, 2018
-% last modified: August 29, 2018
+% Last modified: October 10, 2020
 
 function [D_T, D_R, lambda_T, lambda_R] = HPW_drag(eta, a, eta_w, Temperature, nTerms, num_lterms, num_mterms, plotopt)
 
@@ -63,13 +63,13 @@ if ~exist('Temperature', 'var') || isempty(Temperature)
     Temperature = 295; % K
 end
 if ~exist('nTerms', 'var') || isempty(nTerms)
-    nTerms = 30;
+    nTerms = 36;
 end
 if ~exist('num_lterms', 'var') || isempty(num_lterms)
-    num_lterms = 20;
+    num_lterms = 36;
 end
 if ~exist('num_mterms', 'var') || isempty(num_mterms)
-    num_mterms = 15;
+    num_mterms = 36;
 end
 if ~exist('plotopt', 'var') || isempty(plotopt)
     plotopt = false;
@@ -85,6 +85,19 @@ end
 k_B = 1.3806e-23; % Boltzmann's constant, J/K
 epsilon = 2.*a*eta_w./eta; % dimensionless
 
+%% Figures for tm, rm plots
+
+if plotopt
+    % Create figures for "tm" and "rm" plots, and colormaps
+    h_tm = figure('name', 'tm', 'position', [50 50 800 400]); 
+    h_rm = figure('name', 'rm', 'position', [100 100 800 400]); 
+    r_t_colormap = parula(num_mterms+1);
+else
+    h_tm = [];
+    h_rm = [];
+    r_t_colormap = [];
+end
+
 %% Calculations...
 
 % "t" terms
@@ -93,7 +106,7 @@ epsilon = 2.*a*eta_w./eta; % dimensionless
 % thought, since the "t1," "t2," and "t3" arrays have different sizes
 tm_array = zeros(1, num_mterms);
 for m=1:num_mterms
-    tm_array(m) = calc_tm(m, epsilon, nTerms, plotopt);
+    tm_array(m) = calc_tm(m, epsilon, nTerms, h_tm, r_t_colormap);
 end
 
 % "T" terms
@@ -102,30 +115,14 @@ T = calc_T(epsilon, nTerms, plotopt);
 % "r" terms
 rm_array = zeros(1, num_mterms);
 for m=1:num_mterms
-    rm_array(m) = calc_rm(m, epsilon, nTerms, plotopt);
+    rm_array(m) = calc_rm(m, epsilon, nTerms, h_rm, r_t_colormap);
 end
 
 %% T'_l, t'_lm, and t''_lm
+% Eq. 3.63, 3.60, 3.61
+% These depend only on l, m; not on epsilon
 
-ell = (1:num_lterms)'; % I think l starts at 1, based on Eq. 3.58
-% (Or at least, the l==0 term is irrelevant for Lambda_T)
-
-% Tp_l: column vector
-% HPW Eq 3.63
-Tp_l = (3*((-1).^(ell+1))/32).*(gamma(ell-0.5)./gamma(ell+2)).^2;
-
-%tp_lm and tpp_lm
-m = 1:num_mterms;
-ell_array = repmat(ell, 1, num_mterms);
-m_array = repmat(m, num_lterms, 1);
-% HPW Eq 3.60:
-tp_lm = (-1).^(ell_array+m_array+1)/2 ./...
-    (4*(ell_array-m_array.^2)-1)./(ell_array+m_array)./(ell_array+m_array+1);
-% HPW Eq 3.61:
-tpp_lm_term1 = ((ell_array-1)==m_array)./(4*ell_array-3)./(4*ell_array-1)./(4*ell_array+1);
-tpp_lm_term2 = 2*(ell_array==m_array)./(4*ell_array-1)./(4*ell_array+1)./(4*ell_array+3);
-tpp_lm_term3 = ((ell_array+1)==m_array)./(4*ell_array+1)./(4*ell_array+3)./(4*ell_array+5);
-tpp_lm = pi/2*(tpp_lm_term1 + tpp_lm_term2 + tpp_lm_term3);
+[Tp_l, tp_lm, tpp_lm] = calc_Tprime_terms(num_lterms, num_mterms);
 
 %% Xm1 and Xm2
 
@@ -137,7 +134,35 @@ Xm1 = M1 \ Tp_l;
 delta_l1 = (1:num_lterms)'==1;
 Xm2 = M1 \ delta_l1;
 
-%% R_lm, R'_lm
+if plotopt
+    % Xm1 and Xm2
+    figure('name', 'Xm1 and Xm2');
+    plot(1:num_mterms, Xm1, 'd-')
+    hold on
+    plot(1:num_mterms, Xm2, 'o-')
+    xlabel('m');
+    ylabel('Xm')
+    legend('Xm1', 'Xm2')
+    
+    % Products, used in later sums
+    figure('name', 't and Xm1, Xm2 products');
+    subplot(1,2,1)
+    plot(1:num_mterms, tm_array'.*Xm1, 'd-')
+    hold on
+    plot(1:num_mterms, tm_array'.*Xm2, 's-')
+    xlabel('m');
+    ylabel('Products')
+    legend('tm.*Xm1', 'tm.*Xm2')
+    subplot(1,2,2)
+    plot(1:num_mterms, cumsum(tm_array'.*Xm1), 'd-')
+    hold on
+    plot(1:num_mterms, cumsum(tm_array'.*Xm2), 's-')
+    xlabel('m');
+    ylabel('Cumulative Sum')
+    legend('\Sigma tm.*Xm1', '\Sigma tm.*Xm2')
+end
+
+%% R_lm, R'_lm, Phim1, Phim2
 
 [R_lm, Rp_lm] = calcR_lm(num_lterms, num_mterms);
 % Note the sums begin at m==1, not m==0
@@ -149,24 +174,69 @@ Phim1 = M2 \ (-R_lm(2:end,1) + epsilon*Rp_lm(2:end,1)); % "l" >= 1 , and m==0
 delta_l1 = (1:num_lterms)'==1;
 Phim2 = M2 \ delta_l1;
 
+if plotopt
+    % Phim1 and Phim2
+    figure('name', 'Phim1 and Phim2');
+    plot(1:num_mterms, Phim1, 'd-')
+    hold on
+    plot(1:num_mterms, Phim2, 'o-')
+    xlabel('m');
+    ylabel('Phim')
+    legend('Phim1', 'Phim2')
+    
+    % Products, used in  later sums
+    figure('name', 'r and Phim1, Phim2 products');
+    subplot(1,2,1)
+    plot(1:num_mterms, rm_array'.*Phim1, 'd-')
+    hold on
+    plot(1:num_mterms, rm_array'.*Phim2, 's-')
+    xlabel('m');
+    ylabel('Products')
+    legend('rm.*Phim1', 'rm.*Phim2')
+    subplot(1,2,2)
+    plot(1:num_mterms, cumsum(rm_array'.*Phim1), 'd-')
+    hold on
+    plot(1:num_mterms, cumsum(rm_array'.*Phim2), 's-')
+    xlabel('m');
+    ylabel('Cumulative Sum')
+    legend('\Sigma rm.*Phim1', '\Sigma rm.*Phim2')
+end
 
 %% Drag coefficients
 
+% Translation
 % HPW Eq. 3.68:
-Lambda_T = (1 + (epsilon^2)/15.*sum(tm_array'.*Xm2))./epsilon./(T + epsilon*sum(tm_array'.*Xm1));
+% Note that the tm can be undefined (numerical issues?) for large m, so 
+% restrict the sum to finite values.
+% Original:  Lambda_T = (1 + (epsilon^2)/15.*sum(tm_array'.*Xm2))./epsilon./(T + epsilon*sum(tm_array'.*Xm1));
+tm_Xm1_array = tm_array'.*Xm1; % Element-wise product of the two arrays
+tm_Xm2_array = tm_array'.*Xm2;
+Lambda_T = (1 + (epsilon^2)/15 .* ...
+    sum(tm_Xm2_array(isfinite(tm_Xm2_array))))./epsilon ./ ...
+    (T + epsilon*sum(tm_Xm1_array(isfinite(tm_Xm1_array))));
+    
 % Eq. 3.43:
 lambda_T = 8*pi*eta_w*a*Lambda_T; % drag coefficient
-D_T = k_B * Temperature / lambda_T;
+D_T = k_B * Temperature ./ lambda_T;
 
 % Rotation
-r0 = calc_rm(0, epsilon, nTerms, plotopt);
-Lambda_R = (2/9./epsilon).*(1 + (epsilon.^2)/35.*sum(rm_array'.*Phim2))./(r0 + sum(rm_array'.*Phim1));
+r0 = calc_rm(0, epsilon, nTerms, h_rm, r_t_colormap);
+% Note that the rm can be undefined (numerical issues?) for large m, so 
+% restrict the sum to finite values.
+% Original: Lambda_R = (2/9./epsilon).*(1 + (epsilon.^2)/35.*sum(rm_array'.*Phim2))./(r0 + sum(rm_array'.*Phim1));
+rm_Phim1_array = rm_array'.*Phim1; % Element-wise product of the two arrays
+rm_Phim2_array = rm_array'.*Phim2; 
+Lambda_R = (2/9./epsilon).*(1 + (epsilon.^2)/35 .* ...
+    sum(rm_Phim2_array(isfinite(rm_Phim2_array)))) ./ ...
+    (r0 + sum(rm_Phim1_array(isfinite(rm_Phim1_array))));
+
+% Eq. 5.16
 lambda_R = 8*pi*eta_w*a.^3*Lambda_R;
 D_R = k_B * Temperature ./ lambda_R;
 
 end
 
-function tm = calc_tm(m, epsilon, nTerms, plotopt)
+function tm = calc_tm(m, epsilon, nTerms, h_tm, r_t_colormap)
 % Calculates "tm" for a given m; HPW Eq. A5-A8
     % each "t" term
     % t1: HPW Eq. A6
@@ -192,15 +262,51 @@ function tm = calc_tm(m, epsilon, nTerms, plotopt)
     % HPW Eq. A5
     tm = t1 + t2 + t3;
     
-    if plotopt
-        figure; semilogy(n1, t1_terms, 'o-')
-        hold on;
-        semilogy(n2, t2_terms, 'x-')
-        semilogy(n3, t3_terms, '+-')
+    if ~isempty(h_tm)
+        % Make plots, t1, t2, t3 as separate subplots
+        figure(h_tm); 
+        subplot(1,3,1); hold on
+        plot(n1, t1_terms, 'o-', 'color', r_t_colormap(m,:))
         xlabel('n')
         ylabel('t terms')
-        legend('t1', 't2', 't3');
+        title('t1')
+        subplot(1,3,2); hold on
+        plot(n2, t2_terms, 'x-', 'color', r_t_colormap(m,:))
+        xlabel('n')
+        ylabel('t terms')
+        title('t2')
+        subplot(1,3,3); hold on
+        plot(n3, t3_terms, '+-', 'color', r_t_colormap(m,:))
+        xlabel('n')
+        ylabel('t terms')
+        title('t3')
+        % legend('t1', 't2', 't3');
     end
+end
+
+function [Tp_l, tp_lm, tpp_lm] = calc_Tprime_terms(num_lterms, num_mterms)
+% Calculate T', t'_lm, t''_lm;  Eq. 3.63, 3.60, 3.61
+% These depend only on l, m; not on epsilon
+
+    ell = (1:num_lterms)'; % I think l starts at 1, based on Eq. 3.58
+    % (Or at least, the l==0 term is irrelevant for Lambda_T)
+
+    % Tp_l: column vector
+    % HPW Eq 3.63
+    Tp_l = (3*((-1).^(ell+1))/32).*(gamma(ell-0.5)./gamma(ell+2)).^2;
+
+    %tp_lm and tpp_lm
+    m = 1:num_mterms;
+    ell_array = repmat(ell, 1, num_mterms);
+    m_array = repmat(m, num_lterms, 1);
+    % HPW Eq 3.60:
+    tp_lm = (-1).^(ell_array+m_array+1)/2 ./...
+        (4*(ell_array-m_array.^2)-1)./(ell_array+m_array)./(ell_array+m_array+1);
+    % HPW Eq 3.61:
+    tpp_lm_term1 = ((ell_array-1)==m_array)./(4*ell_array-3)./(4*ell_array-1)./(4*ell_array+1);
+    tpp_lm_term2 = 2*(ell_array==m_array)./(4*ell_array-1)./(4*ell_array+1)./(4*ell_array+3);
+    tpp_lm_term3 = ((ell_array+1)==m_array)./(4*ell_array+1)./(4*ell_array+3)./(4*ell_array+5);
+    tpp_lm = pi/2*(tpp_lm_term1 + tpp_lm_term2 + tpp_lm_term3);
 end
 
 function T = calc_T(epsilon, nTerms, plotopt)
@@ -247,7 +353,7 @@ function [R_lm, Rp_lm] = calcR_lm(num_lterms, num_mterms)
             pi*delta_l_mp1/2./(4*m_array+7)./(4*m_array+5)./(4*m_array+3);
 end
 
-function rm = calc_rm(m, epsilon, nTerms, plotopt)
+function rm = calc_rm(m, epsilon, nTerms, h_rm, r_t_colormap)
 % Calculates "rm" for a given m; HPW Eq. A14-A16
     % HPW Eq. A14
     % m==0 is irrelevant to the sum in Eq. 5.36 (which starts at m=1), but
@@ -275,14 +381,25 @@ function rm = calc_rm(m, epsilon, nTerms, plotopt)
     % HPW Eq. A14
     rm = r1 + r2 + r3;
     
-    if plotopt
-        figure; semilogy(nr1, r1_terms, 'o-')
-        hold on;
-        semilogy(nr2, r2_terms, 'x-')
-        semilogy(nr3, r3_terms, '+-')
+    if ~isempty(h_rm)
+        % Make plots, r1, r2, r3 as separate subplots
+        % note that m==0 is possible, so colormap is offset by 1
+        figure(h_rm); 
+        subplot(1,3,1); hold on
+        semilogy(nr1, r1_terms, 'x-', 'color', r_t_colormap(m+1,:))
         xlabel('n')
         ylabel('r terms')
-        legend('r1', 'r2', 'r3');
+        title('r1')
+        subplot(1,3,2); hold on
+        semilogy(nr2, r2_terms, 'x-', 'color', r_t_colormap(m+1,:))
+        xlabel('n')
+        ylabel('r terms')
+        title('r2')
+        subplot(1,3,3); hold on
+        semilogy(nr3, r3_terms, 'x-', 'color', r_t_colormap(m+1,:))
+        xlabel('n')
+        ylabel('r terms')
+        title('r3')
+        % legend('r1', 'r2', 'r3');
     end
 end
-
