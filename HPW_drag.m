@@ -50,6 +50,7 @@
 %%
 % Raghuveer Parthasarathy
 % August 28, 2018
+% October 10, 2020: changes to plotting, and avoiding NaN or Inf terms in sums. 
 % Last modified: October 10, 2020
 
 function [D_T, D_R, lambda_T, lambda_R] = HPW_drag(eta, a, eta_w, Temperature, nTerms, num_lterms, num_mterms, plotopt)
