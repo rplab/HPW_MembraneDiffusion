@@ -7,6 +7,11 @@
 %    The translational and rotational drag on a cylinder moving in a membrane. 
 %    J Fluid Mech. 110, 349-372 (1981)
 % 
+% Also allows for a polynomial approximation to the Lambda(epsilon) factor
+% in the translational drag, to account for numerical divergences around 
+% epsilon = 3.45 and larger in the series calculations. (Recommended if 
+% considering epsilon in this range.)
+%
 % Based on earlier notes, programs. (e.g. June 2013, calcDHPW.m) These made
 % use of numerical integration for various parts of the calculation, rather
 % than the faster and more elegant series expansions. I figured out the
@@ -17,15 +22,26 @@
 % I've written eta and a separately as inputs to make fitting to
 % "physical" diffusion coefficients more straightforward.
 %
+% Also see https://eighteenthelephant.com/2018/09/04/membrane-diffusion-software/
+%
 % Inputs:
-%    eta = 2D membrane viscosity (Pa.s.m)
-%    a   = inclusion radius (m)
+%    eta = 2D membrane viscosity (Pa.s.m); must be a single (scalar) value
+%    a   = inclusion radius (m); must be a single (scalar) value
 %    eta_w = external (water) viscosity, default 8.9e-4 Pa.s
 %    T = temperature (K), default 295;
 %    nTerms =  number of terms to calculate in "infinite" series; default 36
 %    num_lterms = number of "l" terms to calculate in ; default 36
 %    num_mterms = number of "m" terms to calculate in ; default 36;
 %    plotopt = true to plot various things including tm, Tm, rm terms (default false)
+%    Lambda_T_option: calculation option for translational drag 
+%               'full' [default], HPW series calculation of Lambda_T
+%                    (Eq. 3.68 of Hughes et al. 1984)
+%               'simplified' : Lambda(T) = 1 / (epsilon T) 
+%               'polynomial' : Lambda(T) = 1 / (epsilon T) *
+%                              polynomial approximation to remaining
+%                              factors (a function of epsilon). This avoids
+%                              divergences in numerical calculations of
+%                              series for epsilon around 3.45, etc.
 %
 % Outputs:
 %    D_T = Translational diffusion coefficient (m^2/s)
@@ -34,7 +50,7 @@
 %    lambda_R = Rotational drag coefficient (N s m)
 %
 %%
-% Copyright 2018, Raghuveer Parthasarathy, The University of Oregon
+% Copyright 2018-2021, Raghuveer Parthasarathy, The University of Oregon
 %
 %%
 % Disclaimer / License  
@@ -50,10 +66,10 @@
 %%
 % Raghuveer Parthasarathy
 % August 28, 2018
-% October 10, 2020: changes to plotting, and avoiding NaN or Inf terms in sums. 
-% Last modified: October 10, 2020
+% Last modified: August 20, 2021
 
-function [D_T, D_R, lambda_T, lambda_R] = HPW_drag(eta, a, eta_w, Temperature, nTerms, num_lterms, num_mterms, plotopt)
+function [D_T, D_R, lambda_T, lambda_R] = HPW_drag(eta, a, eta_w, ...
+    Temperature, nTerms, num_lterms, num_mterms, plotopt, lambda_T_option)
 
 
 %% Defaults
@@ -76,15 +92,11 @@ if ~exist('plotopt', 'var') || isempty(plotopt)
     plotopt = false;
 end
 
-if num_mterms > num_lterms
-    num_mterms = num_lterms;
-    disp('Forcing number of "m" terms calculated to be equal to number of "l" terms, not greater.')
-end
 
 %% Other parameters
 
 k_B = 1.3806e-23; % Boltzmann's constant, J/K
-epsilon = 2.*a*eta_w./eta; % dimensionless
+epsilon = 2.*a*eta_w/eta; % dimensionless
 
 %% Figures for tm, rm plots
 
@@ -119,6 +131,7 @@ for m=1:num_mterms
     rm_array(m) = calc_rm(m, epsilon, nTerms, h_rm, r_t_colormap);
 end
 
+
 %% T'_l, t'_lm, and t''_lm
 % Eq. 3.63, 3.60, 3.61
 % These depend only on l, m; not on epsilon
@@ -130,10 +143,14 @@ end
 % Solve for Xm1, using Eq. 3.67 (1)
 M1 = tp_lm - epsilon*tpp_lm;
 % solution to Ax = B is x = A\B, or x = inv(A)*B
-Xm1 = M1 \ Tp_l;
+%Xm1 = M1 \ Tp_l;
 % Solve for Xm2, using Eq. 3.67 (2)
-delta_l1 = (1:num_lterms)'==1;
-Xm2 = M1 \ delta_l1;
+delta_l1 = double((1:num_lterms)'==1);
+%Xm2 = M1 \ delta_l1;
+
+% Is this any better? -- I think so...
+Xm1 = lsqminnorm(M1,Tp_l);
+Xm2 = lsqminnorm(M1,delta_l1);
 
 if plotopt
     % Xm1 and Xm2
@@ -203,6 +220,10 @@ if plotopt
     legend('\Sigma rm.*Phim1', '\Sigma rm.*Phim2')
 end
 
+
+
+%% Drag coefficients
+
 %% Drag coefficients
 
 % Translation
@@ -212,9 +233,17 @@ end
 % Original:  Lambda_T = (1 + (epsilon^2)/15.*sum(tm_array'.*Xm2))./epsilon./(T + epsilon*sum(tm_array'.*Xm1));
 tm_Xm1_array = tm_array'.*Xm1; % Element-wise product of the two arrays
 tm_Xm2_array = tm_array'.*Xm2;
-Lambda_T = (1 + (epsilon^2)/15 .* ...
-    sum(tm_Xm2_array(isfinite(tm_Xm2_array))))./epsilon ./ ...
-    (T + epsilon*sum(tm_Xm1_array(isfinite(tm_Xm1_array))));
+if strcmp(lambda_T_option, 'full')
+    Lambda_T = (1 + (epsilon^2)/15 .* ...
+        sum(tm_Xm2_array(isfinite(tm_Xm2_array))))./epsilon ./ ...
+        (T + epsilon*sum(tm_Xm1_array(isfinite(tm_Xm1_array))));
+elseif strcmp(lambda_T_option, 'simplified')
+    Lambda_T = 1./(epsilon*T);
+elseif strcmp(lambda_T_option, 'polynomial')
+    Lambda_T_coeffs = [-2.33337e-03  -1.37628e-02  9.77674e-01]; % from fit, Jan. 2021
+    Lambda_T = 1./(epsilon*T).*(Lambda_T_coeffs(1)*(log(epsilon)).^2 + ...
+        Lambda_T_coeffs(2)*log(epsilon) + Lambda_T_coeffs(3) );
+end
     
 % Eq. 3.43:
 lambda_T = 8*pi*eta_w*a*Lambda_T; % drag coefficient
@@ -241,23 +270,65 @@ function tm = calc_tm(m, epsilon, nTerms, h_tm, r_t_colormap)
 % Calculates "tm" for a given m; HPW Eq. A5-A8
     % each "t" term
     % t1: HPW Eq. A6
-    n1 = 0:nTerms;
-    t1_terms = (-1).^(m-n1).*gamma(2*n1+3).*(epsilon/2).^(2*n1+1)./gamma(n1+2-m)./gamma(n1+2+m)./gamma(n1+1.5-m)./gamma(n1+2.5+m);
+    %n1 = 0:nTerms;
+    %t1_terms = (-1).^(m-n1).*gamma(2*n1+3).*(epsilon/2).^(2*n1+1)./gamma(n1+2-m)./gamma(n1+2+m)./gamma(n1+1.5-m)./gamma(n1+2.5+m);
+    
+    % Restrict n to start at m-1, rather than 0, so that the first gamma in
+    % the denominator avoids negative integer arguments (undefined!) 
+    % Or is Eq. A6 incorrect?
+    % -- RP 22Dec 2020
+    n1 = (m-1):nTerms;
+    allgammas = exp(gammaln(2*n1+3) - gammaln(n1+2-m) - gammaln(n1+2+m) - gammaln(n1+1.5-m) - gammaln(n1+2.5+m));
+    t1_terms = (-1).^(m-n1).*allgammas.*(epsilon/2).^(2*n1+1);
     t1 = pi*pi/8*sum(t1_terms);
+
+%   nTerms
+%    figure; semilogy(0:nTerms, t1_terms, 'x-')
+%    hold on
+%    semilogy(0:nTerms, -t1_terms, 'x-')
+%figure; plot(n1, t1_terms, 'x-')
+%pause
+
+ % *** To do: Note the above, considering positive arguments only for the first denominator gamma! (i.e. start n1 at m-1)
 
     % t2: HPW Eq. A7
     if m >= 1
         n2=0:(m-1);
-        t2_terms = gamma(2*n2+2).*gamma(m-n2).*(epsilon/2).^(2*n2)./gamma(1.5-m+n2)./gamma(1.5+m+n2)./gamma(2+m+n2);
+        allgammas = exp(gammaln(2*n2+2) + gammaln(m-n2) + gammaln(-0.5+m-n2)- gammaln(1.5+m+n2) - gammaln(2+m+n2));
+        t2_terms = allgammas.*sin(pi*(m - n2 - 0.5))./pi.*(epsilon/2).^(2*n2);
+        % t2_terms = gamma(2*n2+2).*gamma(m-n2).*(epsilon/2).^(2*n2)./gamma(1.5-m+n2)./gamma(1.5+m+n2)./gamma(2+m+n2);
     else
         t2_terms = 0;
     end
     t2 = pi/8*sum(t2_terms);
 
-    % t3: HPW Eq. A8
+   % t3: HPW Eq. A8
     n3 = 0:nTerms;
-    t3_terms = (-1).^n3.*(log(2./epsilon) - psi(2+2*m+2*n3) + 0.5*psi(n3+1) + 0.5*psi(1.5+n3) + 0.5*psi(1.5+2*m+n3) + 0.5*psi(2+2*m+n3)) .* ...
-        gamma(2+2*m+2*n3).*(epsilon/2).^(2*m+2*n3)./gamma(n3+1)./gamma(1.5+n3)./gamma(1.5+2*m+n3)./gamma(2+2*m+n3);
+%    t3_terms = (-1).^n3.*(log(2./epsilon) - psi(2+2*m+2*n3) + 0.5*psi(n3+1) + 0.5*psi(1.5+n3) + 0.5*psi(1.5+2*m+n3) + 0.5*psi(2+2*m+n3)) .* ...
+%        gamma(2+2*m+2*n3).*(epsilon/2).^(2*m+2*n3)./gamma(n3+1)./gamma(1.5+n3)./gamma(1.5+2*m+n3)./gamma(2+2*m+n3);
+    
+    log_prodf = zeros(1,length(n3)); % note that the first element is zero, 
+        %as it should be, since it corresponds to 0!
+    all_f = (2*m+1) + (2:2*nTerms);
+    log_all_f = log(all_f);
+    cs_log_all_f = cumsum(log_all_f);
+    log_prodf(2) = log_all_f(1);
+    for j=3:length(n3)
+        log_prodf(j) = cs_log_all_f(2*j-3) - cs_log_all_f(j-2);
+    end
+
+% Slower:
+%    for j=2:length(n3)
+%        % f = 2*m + 2 + n3(j) : 2*m + 1 + 2*n3(j);
+%        f = (2*m + 1 + n3(j)) + (1 : n3(j));
+%        log_prodf(j) = sum(log(f));
+%    end
+    log_other_gammas = -gammaln(n3+1) - gammaln(1.5+n3) - gammaln(1.5+2*m+n3);
+    psi_factors = -psi(2+2*m+2*n3) + 0.5*psi(n3+1) + 0.5*psi(1.5+n3) + 0.5*psi(1.5+2*m+n3) + 0.5*psi(2+2*m+n3); % not faster; just for clarity
+    t3_terms = (-1).^n3.*(log(2./epsilon) + psi_factors) .* ...
+               exp(log_prodf + log_other_gammas).*(epsilon/2).^(2*m+2*n3);
+    % t3_terms(isinf(t3_terms) | isnan(t3_terms))=0;  
+
     t3 = pi/4*sum(t3_terms);
 
     % HPW Eq. A5
@@ -315,14 +386,19 @@ function T = calc_T(epsilon, nTerms, plotopt)
 % With an imoprtant correction: 2epsilon -> epsilon/2  in the T2 equation!!
     % HPW Eq. A12
     N1 = 0:nTerms;
-    T1_terms = (epsilon/2).^(2*N1+1).*(-1).^N1.*gamma(2.5+2*N1)./(gamma(N1+1.5).^2)./(gamma(N1+2).^2);
+    %T1_terms = (epsilon/2).^(2*N1+1).*(-1).^N1.*gamma(2.5+2*N1)./(gamma(N1+1.5).^2)./(gamma(N1+2).^2);
+    allgammas = exp(gammaln(2.5+2*N1) - 2*gammaln(N1+1.5) - 2*gammaln(N1+2));
+    T1_terms = (epsilon/2).^(2*N1+1).*(-1).^N1.*allgammas;
     T1 = (pi^1.5)/4*sum(T1_terms);
 
     % HPW Eq. A13
     N2 = 0:nTerms;
-    T2_terms = ((-1).^(N2)).*(epsilon/2).^(2*N2).*gamma(2*N2+1.5) .*...
-        (log(2./epsilon)-psi(2*N2+1.5)+psi(N2+1)+psi(N2+1.5)) ./...
-        (gamma(N2+1).^2)./(gamma(N2+1.5).^2);
+%     T2_terms = ((-1).^(N2)).*(epsilon/2).^(2*N2).*gamma(2*N2+1.5) .*...
+%         (log(2./epsilon)-psi(2*N2+1.5)+psi(N2+1)+psi(N2+1.5)) ./...
+%         (gamma(N2+1).^2)./(gamma(N2+1.5).^2);
+    allgammas = exp(gammaln(2*N2+1.5) - 2*gammaln(N2+1) - 2*gammaln(N2+1.5));
+    T2_terms = ((-1).^(N2)).*(epsilon/2).^(2*N2).*allgammas .*...
+        (log(2./epsilon)-psi(2*N2+1.5)+psi(N2+1)+psi(N2+1.5));
     T2 = (pi^0.5)/2*sum(T2_terms);
     
     % Eq. A11

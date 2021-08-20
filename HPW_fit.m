@@ -6,13 +6,13 @@
 %    B. D. Hughes, B. A. Pailthorpe, White L. R.,
 %    The translational and rotational drag on a cylinder moving in a membrane. 
 %    J Fluid Mech. 110, 349-372 (1981)
-% (see HPW_drag.m)
+% (see HPW_drag.m, which this calls.)
 %
 % Finds the eta, a that minimize the squared distance between calculated
 % and experimental Dr, Dt.
 % Distance^2: scaleD*scaleD*(calc_DT-Dt)^2 + (calc_DR-Dr)^2;
 % scaleD = 1e12 (hard-coded) to account for scale difference between
-% typical DT and DR values.
+%          typical DT and DR values.
 %
 % Inputs:
 %    Dr = rotational diffusion coefficient (rad^2/s)
@@ -22,6 +22,12 @@
 %    nTerms =  number of terms to calculate in "infinite" series; default 30
 %    num_lterms = number of "l" terms to calculate in ; default 20
 %    num_mterms = number of "l" terms to calculate in ; default 15;
+%    Lambda_T_option: calculation option for HPW_drag.m
+%                     'full' [default], HPW series calculation of lambda_T
+%                     'simplified' : Lambda(T) = 1 / (epsilon T) 
+%                     'polynomial' : Lambda(T) = 1 / (epsilon T) *
+%                                    polynomial approximation to remaining
+%                                    factors.
 %    params0 =  initial values for log10_eta, log10_a (/Pa.s, m); default [-9, -6];
 %    LB     : [optional] lower bounds of search parameters(log10_eta,
 %             log10_a); default [-10 -9]
@@ -51,7 +57,8 @@
 % Aug. 29, 2018
 % last modified Sept. 2, 2018
 
-function [etafit, afit, chi2fit] = HPW_fit(Dr, Dt, eta_w, Temperature, nTerms, num_lterms, num_mterms, params0, LB, UB)
+function [etafit, afit, chi2fit] = HPW_fit(Dr, Dt, eta_w, Temperature, ...
+    nTerms, num_lterms, num_mterms, Lambda_T_option, params0, LB, UB)
 
 if ~exist('eta_w', 'var') || isempty(eta_w)
     eta_w = 8.9e-4; % water viscosity, Pa.s
@@ -68,6 +75,10 @@ end
 if ~exist('num_mterms', 'var') || isempty(num_mterms)
     num_mterms = 15;
 end
+if ~exist('Lambda_T_option', 'var') || isempty(Lambda_T_option)
+    Lambda_T_option = 'full';
+end
+Lambda_T_option = lower(Lambda_T_option); % make lowercase
 if ~exist('params0', 'var') || isempty(params0)
     params0 = [-8.5 -7];
 end
@@ -85,22 +96,30 @@ end
 scaleD = 1e12;
 
 % optimization options
-lsqoptions.TolFun = 1e-8;  %  % MATLAB default is 1e-6
-lsqoptions.TolX = 1e-8;  % default is 1e-6
+lsqoptions = optimoptions('lsqnonlin');
 lsqoptions.Display = 'final'; % 'off' or 'final'; 'iter' for display at each iteration
-params = lsqnonlin(@(P) objfun(P, scaleD, Dr, Dt, eta_w, Temperature, nTerms, num_lterms, num_mterms),params0,LB,UB,lsqoptions);
+lsqoptions.FunctionTolerance = 1e-8; % default 1e-6
+lsqoptions.OptimalityTolerance = 1e-8; % default 1e-6
+
+% Calculate chi^2. Call HPW_drag.m. Force plotopt = false.
+params = lsqnonlin(@(P) objfun(P, scaleD, Dr, Dt, eta_w, Temperature, ...
+    nTerms, num_lterms, num_mterms, false, Lambda_T_option),params0,LB,UB,lsqoptions);
 
 etafit = 10^params(1);
 afit = 10^params(2);
-chi2fit = sum(objfun(params, scaleD, Dr, Dt, eta_w, Temperature, nTerms, num_lterms, num_mterms));
+% Calculate chi^2. Call HPW_drag.m. Force plotopt = false.
+chi2fit = sum(objfun(params, scaleD, Dr, Dt, eta_w, Temperature, nTerms, ...
+    num_lterms, num_mterms, false, Lambda_T_option));
 
 plotopt = false;
 if plotopt
     figure; plot(Dr, Dt, 'o', 'markersize', 14)
     hold on
-    [calc_D_T, calc_D_R] = HPW_drag(10^params0(1), 10^params0(2), eta_w, Temperature, nTerms, num_lterms, num_mterms);
+    [calc_D_T, calc_D_R] = HPW_drag(10^params0(1), 10^params0(2), eta_w, ...
+        Temperature, nTerms, num_lterms, num_mterms, false, Lambda_T_option);
     plot(calc_D_R, calc_D_T, 'x', 'markersize', 14)
-    [calc_D_T, calc_D_R] = HPW_drag(10^params(1), 10^params(2), eta_w, Temperature, nTerms, num_lterms, num_mterms);
+    [calc_D_T, calc_D_R] = HPW_drag(10^params(1), 10^params(2), eta_w, ...
+        Temperature, nTerms, num_lterms, num_mterms, false, Lambda_T_option);
     plot(calc_D_R, calc_D_T, 's', 'markersize', 14)
     xlabel('D_R (rad^2/s)')
     ylabel('D_T (m^2/s)')
@@ -109,11 +128,13 @@ end
 
 end
 
-    function chi2 = objfun(params, scaleD, Dr, Dt, eta_w, Temperature, nTerms, num_lterms, num_mterms)
+    function chi2 = objfun(params, scaleD, Dr, Dt, eta_w, Temperature, ...
+        nTerms, num_lterms, num_mterms, plotopt, Lambda_T_option)
     %  distance between calc. and experimental (Dt,Dr)
-    [calc_DT, calc_DR] = HPW_drag(10^params(1), 10^params(2), eta_w, Temperature, nTerms, num_lterms, num_mterms);
-    % chi2 = scaleD*scaleD*(calc_DT-Dt)^2 + (calc_DR-Dr)^2;
-    chi2 = [scaleD*scaleD*(calc_DT-Dt)^2  (calc_DR-Dr)^2];
+    [calc_DT, calc_DR] = HPW_drag(10^params(1), 10^params(2), eta_w, ...
+        Temperature, nTerms, num_lterms, num_mterms, plotopt, Lambda_T_option);
+    chi2 = [scaleD*(calc_DT-Dt)  (calc_DR-Dr)];
+    % chi2 = [(calc_DT-Dt)/Dt  (calc_DR-Dr)/Dr]; % Could use this, and avoid scaleD
     % param_dist = scaleD*abs(calc_DT-Dt);
     % param_dist = abs(calc_DR-Dr)
     end
