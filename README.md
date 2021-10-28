@@ -22,6 +22,7 @@ Functions applying the theory of:
 
 **LLM_calcD.m** calculates the rotational diffusion coefficient and the translational diffusion coefficients parallel and perpendicular to the rod axis as a function of membrane viscosity (eta) and rod length (L).
 
-**LLM_fit_viscosity_L.m** calulates membrane viscosity and effective rod length for a rod-like membrane inclusion. Uses only D_parallel and D_R, not D_perpendicular. (The latter is redundant; noisy.) Note: we've extracted points from the graphs in the Levine et al. 2004 paper, and made simple polynomial interpolations. See notes, 2021, and Jahl and Parthasarathy 2021.
+**LLM_fit_viscosity_L.m** calulates membrane viscosity and effective rod length for a rod-like membrane inclusion. Uses both D_parallel and D_R, and D_perpendicular and D_R, combining the results from each pair. (October 2021) Note: we've extracted points from the graphs in the Levine et al. 2004 paper, and made simple polynomial interpolations. See notes, 2021, and Jahl and Parthasarathy 2021.
+
 
 
